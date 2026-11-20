@@ -424,3 +424,9 @@ canvas{ max-width:100%; }
   body{ overscroll-behavior-y:none; -webkit-user-select:none; user-select:none; }
   textarea,input,select,.mono,.detail-list{ -webkit-user-select:text; user-select:text; }
 }
+
+/* Narrow phones: keep the header from clipping the online chip */
+@media (max-width:480px){
+  #hud-time{ display:none; }
+  .hud-readouts{ overflow:visible; }
+}
