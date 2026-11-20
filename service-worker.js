@@ -6,7 +6,7 @@
  * for everything else same-origin.
  */
 
-const CACHE_VERSION = "pixelprotech-v1.2.0";
+const CACHE_VERSION = "pixelprotech-v1.2.1";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -19,6 +19,8 @@ const APP_SHELL = [
   "./icon-192.png",
   "./icon-512.png",
   "./icon-180.png",
+  "./icon-maskable-192.png",
+  "./icon-maskable-512.png",
   "./icon-32.png",
   "./favicon.ico",
   "./offline.html"
@@ -64,6 +66,22 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // never intercept cross-origin/API calls
+
+  // Manifest and icons: always network-first so install criteria never see a stale/broken copy.
+  if (/\/(manifest\.json|icon-[^/]*\.png)$/.test(url.pathname)) {
+    event.respondWith(
+      fetch(request, { cache: "no-cache" })
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(async () => (await caches.match(request, { ignoreSearch: true })) || Response.error())
+    );
+    return;
+  }
 
   // App shell: serve cached copy instantly, refresh it in the background.
   if (SHELL_PATHS.has(url.pathname)) {

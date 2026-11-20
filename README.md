@@ -10,7 +10,7 @@ script.js            All app logic — device detection, hardware tests, PWA ins
 manifest.json         PWA manifest (icons, shortcuts, display mode)
 service-worker.js     Offline app-shell caching + update flow
 offline.html          Fallback page shown when offline and uncached
-icons/                Full icon set (16→512px, maskable variants, favicon.ico)
+icon-*.png           App icons (16→512px, plus maskable variants), all in the repo root
 ```
 
 ## Deploy on GitHub Pages
