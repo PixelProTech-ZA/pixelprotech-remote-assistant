@@ -1,12 +1,12 @@
 /*
  * PixelProTech Remote Assistant — Service Worker
  * Provides installability + offline app-shell caching.
- * Strategy: cache-first for the static shell, network-first (with cache
- * fallback) for everything else, so the diagnostics UI keeps working
- * without a connection while still picking up updates when online.
+ * Strategy: stale-while-revalidate for the static shell (instant loads, but the
+ * next launch always gets the newest CSS/JS), network-first with cache fallback
+ * for everything else same-origin.
  */
 
-const CACHE_VERSION = "pixelprotech-v1.1.0";
+const CACHE_VERSION = "pixelprotech-v1.2.0";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -18,21 +18,27 @@ const APP_SHELL = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
+  "./icon-180.png",
   "./icon-32.png",
   "./favicon.ico",
   "./offline.html"
 ];
 
+// Absolute pathnames of the shell, resolved against the SW scope so matching is exact.
+const SHELL_PATHS = new Set(
+  APP_SHELL.map((p) => new URL(p, self.location).pathname)
+);
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
       .then((cache) =>
-        // Cache each file individually rather than cache.addAll(), which fails
-        // the WHOLE install if even one file 404s. This way a single missing
-        // icon can't silently break the entire offline shell.
+        // Individually, so one missing file can't break the whole shell.
+        // cache:"reload" bypasses the browser HTTP cache so we never precache stale files.
         Promise.all(
           APP_SHELL.map((url) =>
-            cache.add(url).catch((err) => console.warn("Precache failed for", url, err))
+            cache.add(new Request(url, { cache: "reload" }))
+              .catch((err) => console.warn("Precache failed for", url, err))
           )
         )
       )
@@ -59,10 +65,28 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // never intercept cross-origin/API calls
 
-  // App shell files: cache-first for instant loads.
-  if (APP_SHELL.some((path) => url.pathname.endsWith(path.replace("./", "")))) {
+  // App shell: serve cached copy instantly, refresh it in the background.
+  if (SHELL_PATHS.has(url.pathname)) {
     event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request))
+      caches.open(SHELL_CACHE).then(async (cache) => {
+        const cached = await cache.match(request, { ignoreSearch: true });
+        const network = fetch(request)
+          .then((response) => {
+            if (response && response.ok) cache.put(request, response.clone());
+            return response;
+          })
+          .catch(() => null);
+        if (cached) {
+          event.waitUntil(network);
+          return cached;
+        }
+        const fresh = await network;
+        if (fresh) return fresh;
+        if (request.mode === "navigate") {
+          return (await caches.match("./offline.html")) || Response.error();
+        }
+        return Response.error();
+      })
     );
     return;
   }
@@ -71,15 +95,17 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
+        }
         return response;
       })
       .catch(async () => {
         const cached = await caches.match(request);
         if (cached) return cached;
         if (request.mode === "navigate") {
-          return caches.match("./offline.html");
+          return (await caches.match("./offline.html")) || Response.error();
         }
         return Response.error();
       })
